@@ -1,4 +1,5 @@
 #pragma once
+#include "solconfig.hpp"
 #include <string>
 #include <functional>
 #include <chrono>
@@ -6,31 +7,6 @@
 namespace kov {
 namespace solace {
 
-struct SolConfig
-{
-    SolConfig() = default;
-    SolConfig(const SolConfig&) = default;
-    ~SolConfig() = default;
-
-    std::string _host{"localhost"};
-    uint32_t    _port{55555};
-    std::string _vpn{"default"};
-    std::string _username{"default"};
-    std::string _password{"default"};
-    bool        _tls{false};
-
-    const char** mkprops();
-    const char* sprops[100];
-    std::string _portstr;
-};
-
-struct Envelope 
-{
-    const std::string topic;
-    const std::string msgid;
-    const std::chrono::time_point<std::chrono::system_clock> sndtime;
-    const std::chrono::time_point<std::chrono::system_clock> rcvtime;
-};
 
 class SolClient
 {
@@ -40,8 +16,16 @@ public:
         DISCONNECTED,
         CONNECTED
     };
+    
+    struct MsgInfo 
+    {
+        const std::string topic;
+        const std::string msgid;
+        const std::chrono::time_point<std::chrono::system_clock> sndtime;
+        const std::chrono::time_point<std::chrono::system_clock> rcvtime;
+    };
 
-    using RawReaderCb = std::function<void(const Envelope&, const void*, const std::uint32_t)>;
+    using RawReaderCb = std::function<void(const MsgInfo&, const void*, const std::uint32_t)>;
     using StateChangeCb = std::function<void(const State)>;
 
     SolClient();
@@ -59,12 +43,17 @@ public:
     }
     void setState(State state);
 
+    bool publish(
+        const std::string& topic,
+        const void* data,
+        const std::uint32_t length);
+
     bool subscribe(
         const std::string& topic,
         bool blocking = true);
 
     void raiseMsg(
-        const Envelope& env,
+        const MsgInfo& env,
         const void* data,
         const std::uint32_t length);
 
@@ -74,6 +63,8 @@ private:
     void* _ctx;
     void* _sess;
     State _state;
+    void* _outmsg;
+
     RawReaderCb _msgCb;
     StateChangeCb _stateCb;
 };

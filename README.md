@@ -41,6 +41,7 @@ int main(int c, char** a)
 {
 	using namespace kov::solace;
 	using State   = kov::solace::SolClient::State;
+	using MsgInfo = kov::solace::SolClient::MsgInfo;
 
 	std::string topic{"test/topic"};
 	// Create a default config, then override where necessary
@@ -58,7 +59,7 @@ int main(int c, char** a)
 				client.subscribe(topic);
 		},
 		// Message event handler
-		[&](const Envelope& e, const void* d, const size_t l)
+		[&](const MsgInfo& e, const void* d, const size_t l)
 		{
 			// DEMO ONLY! Requires sender actually 
 			// sends string content in the binary payload

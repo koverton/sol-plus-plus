@@ -34,6 +34,7 @@ on_msg (
     solClient_opaqueMsg_pt msg_p, 
     void *user_p )
 {
+    std::cout << "ON_MSG" <<std::endl;
     auto client = static_cast<kov::solace::SolClient*>(user_p);
     if (!client)
     {
@@ -93,7 +94,7 @@ on_msg (
         on_error( rc, "ERROR extracting payload from msg" );
         return SOLCLIENT_CALLBACK_OK;
     }
-    const kov::solace::Envelope env{
+    const kov::solace::SolClient::MsgInfo env{
         dest.dest,
         msgid,
         std::chrono::time_point<std::chrono::system_clock>(
@@ -184,7 +185,7 @@ mkctx()
         on_error( rc, "FAIL: could not create solace context thread" );
         throw std::runtime_error("failed to create Solace context");
     }
-    return static_cast<void*>(ctx);
+    return std::move(ctx);
 }
 
 void*
@@ -212,7 +213,16 @@ mksess(
         on_error( rc, "FAIL: could not create solace session" );
         throw std::runtime_error("failed to create Solace session");
     }
-    return static_cast<void*>(sess);
+    return std::move(sess);
+}
+void*
+mkmsg()
+{
+    solClient_opaqueMsg_pt msg_p;
+    solClient_msg_alloc( &msg_p );
+    solClient_msg_setDeliveryMode( msg_p, 
+    SOLCLIENT_DELIVERY_MODE_DIRECT );
+    return std::move(msg_p);
 }
 }
 
@@ -226,19 +236,24 @@ namespace solace {
 SolClient::SolClient()
 : _ctx(mkctx())
 , _sess(mksess(_ctx, _cfg.mkprops(), this))
+, _outmsg(mkmsg())
+, _msgCb([](const MsgInfo&,const void*,const std::uint32_t){})
+, _stateCb([](const State){})
 {
 }
 SolClient::SolClient(const SolConfig cfg)
 : _cfg(cfg)
 , _ctx(mkctx())
 , _sess(mksess(_ctx, _cfg.mkprops(), this))
-, _msgCb([](const Envelope&,const void*,const std::uint32_t){})
+, _outmsg(mkmsg())
+, _msgCb([](const MsgInfo&,const void*,const std::uint32_t){})
 , _stateCb([](const State){})
 {
 }
 
 SolClient::~SolClient()
 {
+    solClient_msg_free ( &_outmsg );
     solClient_cleanup();
 }
 
@@ -273,7 +288,7 @@ SolClient::subscribe(
     const std::string& topic,
     bool blocking)
 {
-    auto flag = (blocking ? 0 : SOLCLIENT_SUBSCRIBE_FLAGS_WAITFORCONFIRM);
+    auto flag = (blocking ? SOLCLIENT_SUBSCRIBE_FLAGS_WAITFORCONFIRM : 0);
     return SOLCLIENT_OK == 
             solClient_session_topicSubscribeExt ( 
                 _sess,
@@ -287,9 +302,32 @@ void SolClient::setState(State state)
     _stateCb( state );
 }
 
+bool SolClient::publish(
+    const std::string& topic,
+    const void* data,
+    const std::uint32_t length)
+{
+    solClient_destination_t destination;
+    destination.destType = SOLCLIENT_TOPIC_DESTINATION;
+    destination.dest = topic.c_str();
+    solClient_msg_setDestination( _outmsg, 
+        &destination, sizeof(destination) );
+    solClient_msg_setBinaryAttachmentPtr( _outmsg, const_cast<void*>(data), length );
+
+    std::cout << "Calling solClient_session_sendMsg" << std::endl;
+    auto rc = solClient_session_sendMsg ( _sess, _outmsg );
+    if (SOLCLIENT_OK != rc)
+    {
+        on_error( rc, "FAIL: could not send solace message" );
+        throw std::runtime_error("failed to send solace message");
+    }
+    std::cout << "success solClient_session_sendMsg" << std::endl;
+    return rc == SOLCLIENT_OK;
+}
+
 
 void SolClient::raiseMsg(
-    const Envelope& env,
+    const MsgInfo& env,
     const void* data,
     const std::uint32_t length)
 {
